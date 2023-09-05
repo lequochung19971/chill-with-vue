@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import type { Todo } from '@/types/todo'
-import useVuelidate from '@vuelidate/core'
-import { required } from '@vuelidate/validators'
+import { useField, useFieldArray, useForm } from 'vee-validate'
 import { watch } from 'vue'
 import { computed, reactive } from 'vue'
+import { z } from 'zod'
+import { toTypedSchema } from '@vee-validate/zod'
+import { watchEffect } from 'vue'
 
 const props = defineProps<{
   open?: boolean
@@ -17,6 +19,7 @@ const emit = defineEmits<{
   (
     event: 'save',
     value: {
+      id?: string
       title: string
     }
   ): void
@@ -31,45 +34,43 @@ const dialogValue = computed({
   }
 })
 
-const defaultValues = {
+type TodoForm = {
+  id: string
+  title: string
+}
+const initialValues: TodoForm = {
+  id: '',
   title: ''
 }
-const formTodoState = reactive({ ...defaultValues })
+const { resetForm, handleSubmit, defineInputBinds, errors } = useForm<TodoForm>({
+  initialValues,
+  validationSchema: toTypedSchema(
+    z.object({
+      id: z.string(),
+      title: z.string().nonempty().nullable()
+    })
+  )
+})
 
-const v = useVuelidate(
-  {
-    title: { required }
-  },
-  formTodoState
-)
-
-watch(
-  () => [props.todo, props.mode],
-  ([todo, mode]) => {
-    if (todo && mode === 'edit') {
-      Object.assign(formTodoState, todo)
-    }
+watch([() => props.todo, () => props.mode], ([todo, mode]) => {
+  if (mode === 'edit' && todo?.title) {
+    resetForm({
+      values: {
+        id: todo.id,
+        title: todo.title
+      }
+    })
   }
-)
+})
+const titleField = defineInputBinds('title')
 
-const resetForm = () => {
-  v.value.$reset()
-  Object.assign(formTodoState, defaultValues)
-}
-
-const handleSave = async () => {
-  const valid = await v.value.$validate()
-  if (!valid) return
-
-  emit('save', formTodoState)
-  resetForm()
+const onSubmit = handleSubmit((value) => {
+  resetForm({
+    values: initialValues
+  })
+  emit('save', value)
   emit('update:open', false)
-}
-
-const getErrorMessage = (name: keyof Todo) => {
-  const message = v.value[name]?.$errors?.[0]?.$message
-  return message ? message.toString() : ''
-}
+})
 </script>
 <template>
   <VDialog v-model="dialogValue" width="600">
@@ -86,27 +87,36 @@ const getErrorMessage = (name: keyof Todo) => {
     </template>
 
     <VCard>
-      <VCardTitle>
-        <span class="text-h6">Todo Dialog</span>
-      </VCardTitle>
+      <form @submit="onSubmit">
+        <VCardTitle>
+          <span class="text-h6">Todo Dialog</span>
+        </VCardTitle>
 
-      <VCardText v-if="dialogValue">
-        <VTextField
-          aria-required="true"
-          variant="outlined"
-          label="Title *"
-          @blur="v.title.$touch"
-          :error="v.title.$error"
-          :error-messages="getErrorMessage('title')"
-          v-model="formTodoState.title"
-        ></VTextField>
-      </VCardText>
+        <VCardText v-if="dialogValue">
+          <VTextField
+            variant="outlined"
+            label="Title *"
+            v-bind="titleField"
+            :error-messages="errors['title']"
+          ></VTextField>
+        </VCardText>
 
-      <VCardActions>
-        <v-spacer></v-spacer>
-        <VBtn variant="text" @click="emit('update:open', false), resetForm()"> Cancel </VBtn>
-        <VBtn variant="text" @click="handleSave"> Save </VBtn>
-      </VCardActions>
+        <VCardActions>
+          <v-spacer></v-spacer>
+          <VBtn
+            variant="text"
+            @click="
+              emit('update:open', false),
+                resetForm({
+                  values: initialValues
+                })
+            "
+          >
+            Cancel
+          </VBtn>
+          <VBtn variant="text" type="submit"> Save </VBtn>
+        </VCardActions>
+      </form>
     </VCard>
   </VDialog>
 </template>
